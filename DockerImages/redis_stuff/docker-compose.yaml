@@ -1,0 +1,89 @@
+version: '3'
+
+
+services:
+  redis-master:
+    image: 'misago_redis'
+    environment:
+      - REDIS_REPLICATION_MODE=master
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      #- ALLOW_EMPTY_PASSWORD=yes
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=redis-master-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    ports:
+      - '8010:6379'
+
+  redis-slave-1:
+    image: 'misago_redis'
+    environment:
+      - REDIS_REPLICATION_MODE=slave
+      - REDIS_MASTER_HOST=redis-master
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      #- ALLOW_EMPTY_PASSWORD=yes
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=redis-slave-1-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    ports:
+      - '8011:6379'
+    depends_on:
+      - redis-master
+
+  redis-slave-2:
+    image: 'misago_redis'
+    environment:
+      - REDIS_REPLICATION_MODE=slave
+      - REDIS_MASTER_HOST=redis-master
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      #- REDIS_PASSWORD=str0ng_passw0rd  
+      #- ALLOW_EMPTY_PASSWORD=yes 
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf 
+      - HOST_MONITORING_TAG=redis-slave-2-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    ports:
+      - '8012:6379'
+    depends_on:
+      - redis-master
+
+  redis-sentinel:
+    image: 'bitnami/redis-sentinel:latest'
+    environment:
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      - REDIS_MASTER_HOST=redis-master
+      - MASTER=redis-master
+      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=5000
+      - REDIS_SENTINEL_FAILOVER_TIMEOUT=10000
+      - REDIS_SENTINEL_QUORUM=1
+    depends_on:
+      - redis-master
+      - redis-slave-1
+      - redis-slave-2
+    ports:
+      - '26379:26379'
+  
+  proxy:
+    image: misago_haproxy
+    depends_on:
+      - redis-slave-1
+      - redis-slave-2
+      - redis-master
+      - redis-sentinel
+    ports:
+      - '9000:9000'
+      - '6379:6379'
+    environment:
+      #- ADMIN_USERNAME=admin
+      #- ADMIN_PASSWORD=password
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      - REDIS_HOSTS=redis-master, redis-slave-1, redis-slave-2
+      # Telegraf
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf 
+      - HOST_MONITORING_TAG=haproxy-

@@ -1,0 +1,14 @@
+# This compose setup is only meant for local development of Misago itself
+# This is not for running your Misago site in docker
+version: "3.0"
+services:
+
+  misago_tests:
+    image: misago_tests
+    restart: unless-stopped
+    environment:
+      - TARGET=http://10.2.0.1:6360
+    ports:
+      - "8089:8089"
+    volumes:
+      - ./user_data/:/user_data

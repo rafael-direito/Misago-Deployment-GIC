@@ -1,0 +1,52 @@
+Testar mecanismos de failover e replicação do REDIS:
+
+Temos de lançar um cluster com 1 master, 2 slaves e sentinels
+
+Inicialmente, podemos ver onde está o master:
+
+redis-cli -p 26379
+SENTINEL master mymaster
+SENTINEL sentinels mymaster
+
+
+Vamos, então, criar um registo, através do master:
+
+redis-cli -p 8010 -a str0ng_passw0rd
+SET mykey "Hello"
+GET mykey
+
+
+Se formos a um slave, devemos conseguir observar a mensagem criada:
+
+redis-cli -p 8011 -a str0ng_passw0rd
+GET mykey
+
+Contudo, no slave, não podemos escrever dados:
+
+SET mykey2 "Hello" -> (error) READONLY You can't write against a read only replica.
+
+
+Para testar o failover:
+
+No Sentinel, podemos ver onde está o master.
+
+SENTINEL get-master-addr-by-name mymaster
+
+Vamos, então, ‘desligar’ o master:
+
+redis-cli -p 8010 -a str0ng_passw0rd DEBUG sleep 180 
+
+
+Se formos ao sentinel (alguns segundos mais tarde) vamos obter um master diferente. 
+Depois podemos tentar escrever nesse master e está tudo ok!
+
+SENTINEL get-master-addr-by-name mymaster
+
+Quando acabar o timeout podemos ir ao antigo master (agora slave) e verificar que lá está o record que escrevemos no novo master
+
+Notas: 
+Pode ser necessário configurar as seguinte variaveis de ambiente:
+
+REDIS_SENTINEL_FAILOVER_TIMEOUT
+REDIS_SENTINEL_QUORUM
+REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS

@@ -1,0 +1,413 @@
+# This compose setup is only meant for local development of Misago itself
+# This is not for running your Misago site in docker
+version: "3.0"
+
+networks:
+  # network for App <-> Redis transactions
+  misago-redis-in:
+    driver: overlay
+    internal: true
+  # network for App <-> DB transactions
+  misago-postgres-in:
+    driver: overlay
+    internal: true
+  # this network faces the outside world
+  misago-out:
+    driver: overlay
+    internal: false
+
+#secrets:
+#  pgpool_postgres_password_secret:
+#    external: true
+#  postgresql_password:
+#    external: true
+services:  
+  misago:
+    image: 10.2.0.1:5000/misago_app:latest
+    networks:
+      - misago-redis-in
+      - misago-postgres-in
+      - misago-out
+    environment:
+      # Postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=pgpool_postgres_password_secret
+      - POSTGRES_DB=mattermost
+      - POSTGRES_HOST=pg-0
+      - POSTGRES_PORT=5432
+      - POSTGRES_TEST_DB=misago_test
+      # Superuser
+      - SUPERUSER_USERNAME=Admin
+      - SUPERUSER_EMAIL=admin@example.com
+      - SUPERUSER_PASSWORD=password
+      # REDIS
+      - REDIS_HOST=redis-proxy
+      - REDIS_PORT=6379
+      # MONITORING
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=misago-app-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    ports:
+      # Map port 8000 in the container to port 8000 on the host
+      # This way we can access the forum through http://localhost:8000
+      - "6361:80"
+    depends_on:
+      - pg-0
+      - redis-proxy
+    tty: true
+    volumes:
+      # Map in the entire project into the container
+      # This makes sure files in the container updates on the fly as we were working locally
+      #- ../misago_app:/srv/misago:rw
+      - /nfs/misago_RD/misago_app/:/srv/misago:rw
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+    logging:
+      driver: syslog
+      options:
+        syslog-address: "udp://10.5.0.109:5000"
+        tag: "{{.Name}}/{{.ID}}"
+
+
+  web:
+    image: 10.2.0.1:5000/misago_web:latest
+    networks:
+      - misago-out
+    ports:
+      - "6360:80"
+      - '6370:8081'
+      #- "1112:443"
+    environment:
+      # use app service's hostname
+      - APP_HOST=misago
+      # talk to the port within the overlay network
+      # without (over)exposing ports
+      - APP_PORT_NUMBER=80
+      # MONITORING
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=nginx-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    depends_on: 
+      - misago
+    #read_only: true
+    restart: on-failure
+    # Uncomment for SSL
+    # environment:
+    #  - MATTERMOST_ENABLE_SSL=true
+    volumes:
+      # Map in the entire project into the container
+      - /nfs/misago_RD/static_files/:/static:rw
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+
+
+  pg-0:
+    image: 10.2.0.1:5000/misago_postgres:latest
+    networks:
+      - misago-postgres-in
+    environment:
+      # Postgres administrator to access this node
+      - POSTGRESQL_POSTGRES_PASSWORD=pgpool_postgres_password_secret
+        # About the database
+      - POSTGRESQL_USERNAME=mmuser
+      - POSTGRESQL_PASSWORD=postgresql_password
+      - POSTGRESQL_DATABASE=mattermost
+      # Infos about replication
+      - REPMGR_PASSWORD=postgresql_password
+      - REPMGR_PRIMARY_HOST=pg-0
+      - REPMGR_PARTNER_NODES=pg-0,pg-1,pg-2
+      # Infos about this node
+      - REPMGR_NODE_NAME=pg-0
+      - REPMGR_NODE_NETWORK_NAME=pg-0
+      # Telegraf
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=pg0-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    volumes:
+     # save database data
+     - /nfs/misago_RD/pg0:/bitnami/postgresql:rw
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    #secrets:
+    #  - pgpool_postgres_password_secret
+    #  - postgresql_password
+    #logging:
+    #  driver: syslog
+    #  options:
+    #    syslog-address: "udp://10.5.0.109:5000"
+    #    tag: "{{.Name}}/{{.ID}}"
+
+
+  pg-1:
+    image:  10.2.0.1:5000/misago_postgres:latest
+    networks:
+      - misago-postgres-in
+    environment:
+      # Postgres administrator to access this node
+      - POSTGRESQL_POSTGRES_PASSWORD=pgpool_postgres_password_secret
+      # About the database
+      - POSTGRESQL_USERNAME=mmuser
+      - POSTGRESQL_PASSWORD=postgresql_password
+      - POSTGRESQL_DATABASE=mattermost
+      # Infos about replication
+      - REPMGR_PASSWORD=postgresql_password
+      - REPMGR_PRIMARY_HOST=pg-0
+      - REPMGR_PARTNER_NODES=pg-0,pg-1,pg-2
+      # Infos about this node
+      - REPMGR_NODE_NAME=pg-1
+      - REPMGR_NODE_NETWORK_NAME=pg-1   
+      # Telegraf
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=pg1-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    volumes:
+      # save database data
+      - /nfs/misago_RD/pg1:/bitnami/postgresql:rw
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    #secrets:
+    #  - pgpool_postgres_password_secret
+    #  - postgresql_password
+    #logging:
+    #  driver: syslog
+    #  options:
+    #    syslog-address: "udp://10.5.0.109:5000"
+    #    tag: "{{.Name}}/{{.ID}}"
+
+  pg-2:
+    image: 10.2.0.1:5000/misago_postgres:latest
+    networks:
+      - misago-postgres-in
+    environment:
+      # Postgres administrator to access this node
+      - POSTGRESQL_POSTGRES_PASSWORD=pgpool_postgres_password_secret
+      # About the database
+      - POSTGRESQL_USERNAME=mmuser
+      - POSTGRESQL_PASSWORD=postgresql_password
+      - POSTGRESQL_DATABASE=mattermost
+      # Infos about replication
+      - REPMGR_PASSWORD=postgresql_password
+      - REPMGR_PRIMARY_HOST=pg-0
+      - REPMGR_PARTNER_NODES=pg-0,pg-1,pg-2
+      # Infos about this node
+      - REPMGR_NODE_NAME=pg-2
+      - REPMGR_NODE_NETWORK_NAME=pg-2
+      # Telegraf
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=pg2-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    volumes:
+      # save database data
+      - /nfs/misago_RD/pg2:/bitnami/postgresql:rw
+    deploy:
+      restart_policy:
+        condition: on-failure
+    #logging:
+    #  driver: syslog
+    #  options:
+    #    syslog-address: "udp://10.5.0.109:5000"
+    #    tag: "{{.Name}}/{{.ID}}"
+
+  #pgpool:
+  #  image: bitnami/pgpool:4.1.1
+  #  networks:
+  #    - misago-postgres-in
+  #  ports:
+  #    - "6362:5432"
+  #  environment:
+  #    # Comma separated list of backend nodes in the cluster.
+  #    - PGPOOL_BACKEND_NODES=0:pg-0:5432,1:pg-1:5432,2:pg-2:5432
+  #    # Information for perfoming streaming checks.
+  #    - PGPOOL_SR_CHECK_USER=mmuser
+  #    - PGPOOL_SR_CHECK_PASSWORD=postgresql_password
+  #    # Whether to enable LDAP authentication.
+  #    - PGPOOL_ENABLE_LDAP=no
+  #    # Postgres administrator credentials, this will be use to allow postgres admin authentication through Pgpool.
+  #    - PGPOOL_POSTGRES_USERNAME=postgres
+  #    - PGPOOL_POSTGRES_PASSWORD=pgpool_postgres_password_secret
+  #    # Credentials for the pgpool administrator
+  #    - PGPOOL_ADMIN_USERNAME=admin
+  #    - PGPOOL_ADMIN_PASSWORD=pgpool_postgres_password_secret
+  #    # Load balancing
+  #    - PGPOOL_ENABLE_LOAD_BALANCING=yes
+  #  depends_on:
+  #    - pg-0
+  #    - pg-1
+  #    - pg-2
+  #  healthcheck:
+  #    test: ["CMD", "/opt/bitnami/scripts/pgpool/healthcheck.sh"]
+  #    interval: 10s
+  #    timeout: 5s
+  #    retries: 5
+  #  deploy:
+  #    replicas: 5
+  
+
+  redis-master:
+    image: 10.2.0.1:5000/misago_redis:latest
+    networks:
+      - misago-redis-in
+    environment:
+      - REDIS_REPLICATION_MODE=master
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      #- ALLOW_EMPTY_PASSWORD=yes
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=redis-master-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    ports:
+      - '6363:6379'
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    #logging:
+    #  driver: syslog
+    #  options:
+    #    syslog-address: "udp://10.5.0.109:5000"
+    #    tag: "{{.Name}}/{{.ID}}"
+
+
+  redis-slave-1:
+    image: 10.2.0.1:5000/misago_redis:latest
+    networks:
+      - misago-redis-in
+    environment:
+      - REDIS_REPLICATION_MODE=slave
+      - REDIS_MASTER_HOST=redis-master
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      #- ALLOW_EMPTY_PASSWORD=yes
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=redis-slave-1-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    ports:
+      - '6364:6379'
+    depends_on:
+      - redis-master
+    deploy:
+      replicas: 1
+      restart_policy:
+       condition: on-failure
+    #logging:
+    #  driver: syslog
+    #  options:
+    #    syslog-address: "udp://10.5.0.109:5000"
+    #    tag: "{{.Name}}/{{.ID}}"
+
+
+  redis-slave-2:
+    image: 10.2.0.1:5000/misago_redis:latest
+    networks:
+      - misago-redis-in
+    environment:
+      - REDIS_REPLICATION_MODE=slave
+      - REDIS_MASTER_HOST=redis-master
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      #- REDIS_PASSWORD=str0ng_passw0rd  
+      #- ALLOW_EMPTY_PASSWORD=yes 
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf 
+      - HOST_MONITORING_TAG=redis-slave-2-
+      # ELK
+      - ELASTIC_SEARCH_HOSTS=["10.5.0.109:9200"]
+    ports:
+      - '6365:6379'
+    depends_on:
+      - redis-master
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    #logging:
+    #  driver: syslog
+    #  options:
+    #    syslog-address: "udp://10.5.0.109:5000"
+    #    tag: "{{.Name}}/{{.ID}}"
+
+
+  redis-sentinel:
+    image: 'bitnami/redis-sentinel:latest'
+    networks:
+      - misago-redis-in
+    environment:
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      - REDIS_MASTER_HOST=redis-master
+      - MASTER=redis-master
+      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=5000
+      - REDIS_SENTINEL_FAILOVER_TIMEOUT=10000
+      - REDIS_SENTINEL_QUORUM=1
+    depends_on:
+      - redis-master
+      - redis-slave-1
+      - redis-slave-2
+    ports:
+      - '6366:26379'
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    #logging:
+    #  driver: syslog
+    #  options:
+    #    syslog-address: "udp://10.5.0.109:5000"
+    #    tag: "{{.Name}}/{{.ID}}"
+    
+  
+
+  redis-proxy:
+    image: 10.2.0.1:5000/misago_haproxy
+    networks:
+      - misago-redis-in
+    depends_on:
+      - redis-slave-1
+      - redis-slave-2
+      - redis-master
+      - redis-sentinel
+    ports:
+      - '6368:8404'
+      - '6369:6379'
+    environment:
+      #- ADMIN_USERNAME=admin
+      #- ADMIN_PASSWORD=password
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      - REDIS_HOSTS=redis-master, redis-slave-1, redis-slave-2
+      # Telegraf
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - PROXY-LOCATION=redis-proxy
+      - INFLUX_DB_NAME=telegraf 
+      - HOST_MONITORING_TAG=haproxy-
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        
+    #logging:
+    #  driver: syslog
+    #  options:
+    #    syslog-address: "udp://10.5.0.109:5000"
+    #    tag: "{{.Name}}/{{.ID}}"
+
+  
+      

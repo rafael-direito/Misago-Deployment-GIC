@@ -1,0 +1,235 @@
+# This compose setup is only meant for local development of Misago itself
+# This is not for running your Misago site in docker
+version: "3.0"
+
+networks:
+  # network for App <-> Redis transactions
+  misago-redis-in:
+    driver: overlay
+    internal: true
+  # network for App <-> DB transactions
+  misago-postgres-in:
+    driver: overlay
+    internal: true
+  # this network faces the outside world
+  misago-out:
+    driver: overlay
+    internal: false
+
+#secrets:
+#  pgpool_postgres_password_secret:
+#    external: true
+#  postgresql_password:
+#    external: true
+services:  
+
+
+  postgres:
+    image: postgres:10
+    networks:
+      - misago-postgres-in
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=pgpool_postgres_password_secret
+      - POSTGRES_DB=mattermost
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=postgres1-
+    volumes:
+      # save database data
+      - /nfs/misago_RD/pgteste:/var/lib/postgresql:rw
+
+
+  misago:
+    image: 10.2.0.1:5000/misago_app:latest
+    networks:
+      - misago-redis-in
+      - misago-postgres-in
+      - misago-out
+    environment:
+      # Postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=pgpool_postgres_password_secret
+      - POSTGRES_DB=mattermost
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      #- POSTGRES_TEST_DB=misago_test
+      # Superuser
+      - SUPERUSER_USERNAME=Admin
+      - SUPERUSER_EMAIL=admin@example.com
+      - SUPERUSER_PASSWORD=password
+      # REDIS
+      - REDIS_HOST=redis-proxy
+      - REDIS_PORT=6379
+      #- REDIS_PASSWORD=str0ng_passw0rd1
+      # MONITORING
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=misago-app-
+    ports:
+      # Map port 8000 in the container to port 8000 on the host
+      # This way we can access the forum through http://localhost:8000
+      - "6361:80"
+    depends_on:
+      - postgres
+      - redis-proxy
+    tty: true
+    volumes:
+      # Map in the entire project into the container
+      # This makes sure files in the container updates on the fly as we were working locally
+      #- ../misago_app:/srv/misago:rw
+      - /nfs/misago_RD/misago_app/:/srv/misago:rw
+    deploy:
+      replicas: 3
+
+
+  web:
+    image: 10.2.0.1:5000/misago_web:latest
+    networks:
+      - misago-out
+    ports:
+      - "6360:80"
+      #- "1112:443"
+    environment:
+      # use app service's hostname
+      - APP_HOST=misago
+      # talk to the port within the overlay network
+      # without (over)exposing ports
+      - APP_PORT_NUMBER=80
+      # MONITORING
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=nginx-
+    depends_on: 
+      - misago
+    #read_only: true
+    #restart: unless-stopped
+    # Uncomment for SSL
+    # environment:
+    #  - MATTERMOST_ENABLE_SSL=true
+    volumes:
+      # Map in the entire project into the container
+      - /nfs/misago_RD/static_files/:/static:rw
+    deploy:
+      replicas: 3
+
+
+  redis-master:
+    image: 10.2.0.1:5000/misago_redis:latest
+    networks:
+      - misago-redis-in
+    environment:
+      - REDIS_REPLICATION_MODE=master
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      #- ALLOW_EMPTY_PASSWORD=yes
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=redis-master-
+    ports:
+      - '6363:6379'
+
+
+  redis-slave-1:
+    image: 10.2.0.1:5000/misago_redis:latest
+    networks:
+      - misago-redis-in
+    environment:
+      - REDIS_REPLICATION_MODE=slave
+      - REDIS_MASTER_HOST=redis-master
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      #- ALLOW_EMPTY_PASSWORD=yes
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf
+      - HOST_MONITORING_TAG=redis-slave-1-
+    ports:
+      - '6364:6379'
+    depends_on:
+      - redis-master
+
+
+  redis-slave-2:
+    image: 10.2.0.1:5000/misago_redis:latest
+    networks:
+      - misago-redis-in
+    environment:
+      - REDIS_REPLICATION_MODE=slave
+      - REDIS_MASTER_HOST=redis-master
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      #- REDIS_PASSWORD=str0ng_passw0rd  
+      #- ALLOW_EMPTY_PASSWORD=yes 
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - INFLUX_DB_NAME=telegraf 
+      - HOST_MONITORING_TAG=redis-slave-2-
+    ports:
+      - '6365:6379'
+    depends_on:
+      - redis-master
+
+
+  redis-sentinel:
+    image: 'bitnami/redis-sentinel:latest'
+    networks:
+      - misago-redis-in
+    environment:
+      #- REDIS_MASTER_PASSWORD=str0ng_passw0rd
+      - REDIS_MASTER_HOST=redis-master
+      - MASTER=redis-master
+      - REDIS_SENTINEL_DOWN_AFTER_MILLISECONDS=5000
+      - REDIS_SENTINEL_FAILOVER_TIMEOUT=10000
+      - REDIS_SENTINEL_QUORUM=1
+    depends_on:
+      - redis-master
+      - redis-slave-1
+      - redis-slave-2
+    ports:
+      - '6366:26379'
+  
+
+  redis-proxy:
+    image: 10.2.0.1:5000/misago_haproxy
+    networks:
+      - misago-redis-in
+    depends_on:
+      - redis-slave-1
+      - redis-slave-2
+      - redis-master
+      - redis-sentinel
+    ports:
+      - '6368:8404'
+      - '6369:6379'
+    environment:
+      #- ADMIN_USERNAME=admin
+      #- ADMIN_PASSWORD=password
+      #- REDIS_PASSWORD=str0ng_passw0rd
+      - REDIS_HOSTS=redis-master, redis-slave-1, redis-slave-2
+      # Telegraf
+      - INFLUX_DB_LOCATION=http://10.5.0.109:8086
+      - PROXY-LOCATION=redis-proxy
+      - INFLUX_DB_NAME=telegraf 
+      - HOST_MONITORING_TAG=haproxy-
+    deploy:
+      replicas: 2
+
+  tests1:
+    image: 10.2.0.1:5000/misago_tests
+    networks:
+      - misago-out
+    environment:
+      - TARGET=http://web
+    ports:
+      - "6370:8089"
+    volumes:
+      - /nfs/misago_RD/user_data/:/user_data
+
+  tests2:
+    image: 10.2.0.1:5000/misago_tests
+    networks:
+      - misago-out
+    environment:
+      - TARGET=http://web
+    ports:
+      - "6371:8089"
+    volumes:
+      - /nfs/misago_RD/user_data/:/user_data
+      

@@ -1,0 +1,10 @@
+Bloquear cenas no NGINX
+
+temos de correr o docker com --cap-add=NET_ADMIN
+apt-get update
+apt install iptables
+apt install python3
+apt install python3-pip
+pip3 install cherrypy
+bloquear - iptables -A INPUT -s 172.17.0.1 -j DROP 
+desbloquear - iptables -A INPUT -s 172.17.0.1 -j DROP

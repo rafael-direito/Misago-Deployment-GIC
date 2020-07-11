@@ -1,0 +1,19 @@
+# This compose setup is only meant for local development of Misago itself
+# This is not for running your Misago site in docker
+version: "3.0"
+
+services:
+  postgres:
+    image: postgres:10
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=misago
+      - POSTGRES_PASSWORD=misago
+    ports:
+      # Map port 8000 in the container to port 8000 on the host
+      # This way we can access the forum through http://localhost:8000
+      - "5432:5432"
+
+  redis:
+    image: redis:5
+    restart: unless-stopped
