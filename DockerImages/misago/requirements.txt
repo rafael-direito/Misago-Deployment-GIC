@@ -16,7 +16,7 @@ cffi==1.14.0              # via cryptography
 chardet==3.0.4            # via requests
 cryptography==2.9.2       # via social-auth-core
 defusedxml==0.6.0         # via python3-openid, social-auth-core
-django-debug-toolbar==1.11  # via -r requirements.in
+django-debug-toolbar==1.11.1  # via -r requirements.in
 django-htmlmin==0.11.0    # via -r requirements.in
 django-js-asset==1.2.2    # via django-mptt
 django-mptt==0.11.0       # via -r requirements.in
