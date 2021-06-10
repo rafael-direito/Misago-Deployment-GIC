@@ -21,7 +21,7 @@ django-htmlmin==0.11.0    # via -r requirements.in
 django-js-asset==1.2.2    # via django-mptt
 django-mptt==0.11.0       # via -r requirements.in
 django-simple-sso==0.14.1  # via -r requirements.in
-django==2.2.12            # via -r requirements.in, django-debug-toolbar, django-mptt, django-simple-sso, webservices
+django==2.2.24            # via -r requirements.in, django-debug-toolbar, django-mptt, django-simple-sso, webservices
 djangorestframework==3.9.4  # via -r requirements.in
 faker==1.0.8              # via -r requirements.in
 fastdiff==0.2.0           # via snapshottest
